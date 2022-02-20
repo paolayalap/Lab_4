@@ -1,0 +1,254 @@
+; Archivo: contador1.s
+; Dispositivo: PIC16F887
+; Autor: Paola Ayala Pineda
+; Compilador: pic-as (v2.35), MPLAB
+;
+; Programa: Incremento decenas de segundo display2 e incremento en contador binario y display
+; Hardware: Display port C y D, leds en port A
+;
+; Creado 14 feb, 2022
+; Última modificación: 19 feb, 2022
+    
+PROCESSOR 16F887
+#include <xc.inc>
+    
+;configuration word 1
+ CONFIG FOSC=INTRC_NOCLKOUT  // Oscillador Interno sin salidas
+ CONFIG WDTE=OFF    // WDT disabled (reinicio repetitivo del pic)
+ CONFIG PWRTE=ON    // PWRT enabled (espera de 72ms al iniciar)
+ CONFIG MCLRE=OFF   // El pin de MCLR se utiliza como I/O
+ CONFIG CP=OFF	    // Sin protección de código 
+ CONFIG CPD=OFF	    // Sin protección de datos
+ 
+ CONFIG BOREN=OFF   // Sin reinicio cuando el voltaje de alimentación baja de 4V
+ CONFIG IESO=OFF    // Reinicio sin cambio de reloj de interno a externo
+ CONFIG FCMEN=OFF   // Cambio de reloj externo a interno en caso de fallo
+ CONFIG LVP=ON	    // Programación en bajo voltaje permitida
+ 
+;configuration word 2
+ CONFIG WRT=OFF	    // Protección de autoescritura por el programa desactivada
+ CONFIG BOR4V=BOR40V	// Reinicio abajo de 4V, (BOR21V=2.1V)
+ 
+  restart_tmr0 macro
+    banksel PORTA
+    movlw 61 ; t_deseado = (4*t_osc)(256-tmr0)(prescaler)
+    movwf TMR0 ;ciclo de 50ms
+    bcf	T0IF
+    endm
+ 
+ 
+PSECT udata_shr	; common memory
+    cont:	DS 2 ; 2 bytes
+    conta:	DS 2 ; 2 bytes
+    W_TEMP:	DS 1
+    STATUS_:	DS 1
+    DISP_:	DS 1
+    
+    
+PSECT resVect, class=CODE, abs, delta=2
+;-----------------VECTOR RESET----------------
+ORG  00h	; posición 0000h para el reset
+resetVec:
+    PAGESEL main
+    goto    main
+PSECT intVect, class=CODE, abs, delta=2
+ORG 100h  ; posición para el código
+;---------------INTERRUPT VECTOR--------------
+ORG  04h
+    
+push:
+    movwf   W_TEMP  ; guarda valores en STATUS
+    swapf   STATUS, W
+    movwf   STATUS_
+    
+isr:
+    ;btfsc   RBIF    ;revisar bandera
+    ;call    INTIOCB  ; on_change del PORTB
+    ;btfsc   T0IF    ; revisa la bandera del TMR0
+    ;call    int_timer
+    btfsc   T0IF    ; revisa la bandera del TMR0
+    call    int_t0
+ ;   btfsc   T0IF    ; revisa la bandera del TMR0
+  ;  call    int_delay
+    
+pop:
+    swapf   STATUS_, W
+    movwf   STATUS
+    swapf   W_TEMP, F
+    swapf   W_TEMP, W
+    retfie
+    
+;-----------SUB RUTINAS DE INTERRUPCIÓN----------
+/*INTIOCB:
+    banksel PORTA   ; revisa e incrementa si se deja de presionar el pushbutton
+    btfss   PORTB, 0
+    incf    PORTA
+    btfss   PORTB, 7
+    decf    PORTA
+    bcf	    RBIF    ; reinicia el conteo
+    return*/
+
+/*int_timer:
+    banksel PORTA
+    incf    cont    ; si la bandera del TMR0 es 1, incrementa
+    restart_tmr0   */
+    /*
+int_delay:
+    restart_tmr0
+    movlw   10
+    subwf   cont, W
+    btfss   STATUS, 2
+    return
+    incf    DISP_
+    movf    DISP_, W
+    call    tabla_chidori
+    movwf   PORTD
+    return*/
+    
+ int_t0:
+    restart_tmr0    ; 50ms
+    incf conta
+    movf conta, W
+    sublw 1
+    btfss ZERO ; STATUS, 2
+    goto  return_t0
+    clrf  conta ; 500ms
+    incf  PORTA
+    
+ return_t0:
+    return
+
+    
+
+    
+ PSECT code, delta=2, abs
+ ORG 100h	; posición de la tabla
+ 
+tabla_chidori: 
+    clrf PCLATH 
+    bsf PCLATH, 0   ;PCLATH = 01
+    andlw 0x0f	    ;deja pasar cualquier número menor a 16
+    addwf PCL	    ;PC = PCLATH + PCL + W
+    retlw 00111111B ;0
+    retlw 00000110B ;1
+    retlw 01011011B ;2
+    retlw 01001111B ;3
+    retlw 01100110B ;4
+    retlw 01101101B ;5
+    retlw 01111101B ;6
+    retlw 00000111B ;7
+    retlw 01111111B ;8
+    retlw 01101111B ;9
+    retlw 01110111B ;A
+    retlw 01111100B ;B
+    retlw 00111001B ;C
+    retlw 01011110B ;D
+    retlw 01111001B ;E
+    retlw 01110001B ;F
+    
+;------------CONFIGURACIÓN-----------
+main:
+    call    config_io
+    call    config_reloj
+    call    config_tmr0
+    call    config_int
+    ;call    config_iocb
+
+    banksel PORTA
+    
+;----------LOOP PRINCIPAL---------
+loop:
+    call    display  ; subrutina del segundo contador
+    call    display1
+    ;call    delay_  ; delay del TMR0 1 segundo
+    goto    loop
+    
+;---------SUB RUTINAS---------
+/*config_iocb:
+    banksel TRISA
+    bsf	    IOCB, 0	 ; habilita la interrupción en el PORTB
+    bsf	    IOCB, 7
+    
+    banksel PORTA
+    movf    PORTB, W
+    bcf	    RBIF
+    return*/
+    
+config_io:
+    banksel ANSEL   ; banco 11
+    clrf    ANSEL   ; pines digitales
+    clrf    ANSELH
+    
+    banksel TRISA   ; banco 01
+    bcf	    TRISA, 0	; port A como salida
+    bcf	    TRISA, 1
+    bcf	    TRISA, 2
+    bcf	    TRISA, 3
+    /*bsf	    TRISB, 0	; UP y DOWN como entradas
+    bsf	    TRISB, 7  */
+    clrf    TRISC   ; 
+    clrf    TRISD   ;
+    /*bcf	    OPTION_REG, 7 ; pull up
+    bsf	    WPUB, 0
+    bsf	    WPUB, 7*/
+
+   
+    banksel PORTA   ; banco 00
+    clrf    PORTA
+    ;clrf    PORTB
+    clrf    PORTC
+    clrf    PORTD
+    return
+  
+ 
+ config_tmr0:
+    banksel TRISA 
+    bcf	    T0CS
+    bcf	    PSA	    ; prescaler 256
+    bsf	    PS2
+    bsf	    PS1
+    bsf	    PS0	    ; 111
+    restart_tmr0
+    return
+    
+    
+display1:
+    movlw   10
+    subwf   conta, W
+    btfss   STATUS, 2
+    return
+    incf    DISP_
+    movf    DISP_, W
+    call    tabla_chidori
+    movwf   PORTD
+    return
+
+    
+    
+config_reloj:
+    banksel OSCCON
+    bsf	    IRCF0   ; reloj interno 110 4MHz
+    bsf	    IRCF1 
+    bcf	    IRCF2    
+    bsf	    SCS
+    return
+    
+config_int:
+    banksel PORTA
+    bsf	    GIE     ;INTCON
+   ;bsf	    RBIE    ;habilita la interrupción
+   ;bcf	    RBIF    ;cambio en la bandera
+    bsf	    T0IE
+    bcf	    T0IF
+    return
+ 
+display:
+    movf    PORTA, W
+    call    tabla_chidori
+    movwf   PORTC
+    return
+    
+
+END
+    
+
